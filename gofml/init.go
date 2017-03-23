@@ -13,45 +13,47 @@ import (
 
 const script = `
 export GOFML={{.ImportPath}}
-export GOPATH={{.GoPath}}
+export GOPATH={{.GoFmlPath}}
 export PATH="$GOPATH/bin:$PATH"
 `
 
+func getGofmlRoot() string {
+	root := os.Getenv("GOFMLROOT")
+
+	if root == "" {
+		root = "~/gofml"
+	}
+
+	return root
+}
+
+var GOFMLROOT string = getGofmlRoot()
+
 var initCommand = Command{
 	Name:  "init",
-	Short: "initialize a gofml",
-	Usage: "init [-g][-p][-n] [import path]",
-	Long: `
-Init initializes a gofml and creates an initialization script that
-activates it.  This script creates, if needed, a GOPATH directory
-structure, symlinks the project into that structure at the specified
-input path, and then alters the current session's GOPATH environment
-variable to point to it.
-
-The gofml can be deactivated with 'deactivate'.
-
+	Short: "initialize a gofml env",
+	Usage: "init [-g][-n] [import path]",
+	Long: fmt.Sprintf(`
 Init supports the following options:
 
-    -n
-         the name of the environment, defaulting to the name
-         of the current working directory.
-
     -g
-         the GOPATH to create, defaulting to ~/.gofml/<name>
+         the gofml root, where all projects are created defaulting to %s (uses env $GOFMLROOT if possible)
 
-    -p
-         the project path, defaulting to the current working
-         directory.
-`,
+    -n
+         the name of the environment, defaulting to the basename of the import path.
+
+`, GOFMLROOT),
 	GetTask: NewInitTask,
 }
 
 // InitTask initializes a gofml.
 type InitTask struct {
-	GoPath      string // the GOPATH to create, default "~/.gofml/<project name>"
-	ImportPath  string // the import path of the project, e.g. "github.com/crsmithdev/gofml"
+	GoFmlRoot   string // the gofml root to create envs in, default "~/.gofml" or uses env $GOFMLROOT
+	ImportPath  string // the import path of the project, e.g. "github.com/rubensayshi/gofml"
 	ProjectName string // the name of the project, e.g. "gofml".
-	ProjectPath string // the path to the project, default "./"
+
+	GoFmlPath   string // GoFmlRoot + ProjectName
+	ProjectPath string // the path to the project
 }
 
 // NewInitTask returns a new InitTask created with the specified command-line args.
@@ -59,9 +61,8 @@ func NewInitTask(args []string) (Task, error) {
 
 	flags := flag.NewFlagSet("init", flag.ExitOnError)
 
-	goPath := flags.String("g", "", "the GOPATH to create")
+	gofmlRoot := flags.String("g", getGofmlRoot(), "the gofml root")
 	projectName := flags.String("n", "", "the project name")
-	projectPath := flags.String("p", "", "the project path")
 
 	flags.Parse(args)
 	args = flags.Args()
@@ -72,21 +73,22 @@ func NewInitTask(args []string) (Task, error) {
 
 	task := InitTask{
 		ImportPath:  args[0],
-		GoPath:      *goPath,
+		GoFmlRoot:   *gofmlRoot,
 		ProjectName: *projectName,
-		ProjectPath: *projectPath,
+		ProjectPath: "",
+		GoFmlPath:   "",
 	}
 
 	if task.ProjectName == "" {
 		task.ProjectName = filepath.Base(task.ImportPath)
 	}
 
-	if task.GoPath == "" {
-		task.GoPath = filepath.Join("/work/gofml", task.ProjectName)
+	if task.GoFmlPath == "" {
+		task.GoFmlPath = filepath.Join(task.GoFmlRoot, task.ProjectName)
 	}
 
 	if task.ProjectPath == "" {
-		task.ProjectPath = filepath.Join(task.GoPath, "src", task.ImportPath)
+		task.ProjectPath = filepath.Join(task.GoFmlPath, "src", task.ImportPath)
 	}
 
 	return &task, nil
@@ -97,10 +99,11 @@ func (task *InitTask) Run() error {
 
 	fmt.Println("gofml: initializing...")
 
+	fmt.Printf("GoFmlRoot=%s \n", task.GoFmlRoot)
 	fmt.Printf("ImportPath=%s \n", task.ImportPath)
 	fmt.Printf("ProjectName=%s \n", task.ProjectName)
+	fmt.Printf("GoFmlPath=%s \n", task.GoFmlPath)
 	fmt.Printf("ProjectPath=%s \n", task.ProjectPath)
-	fmt.Printf("GoPath=%s \n", task.GoPath)
 
 	if err := task.makeDir(); err != nil {
 		return err
@@ -145,10 +148,10 @@ func (task *InitTask) writeEnvrc() error {
 		return err
 	}
 
-	_ = os.Remove(filepath.Join(task.GoPath, ".envrc"))
-	err = ioutil.WriteFile(filepath.Join(task.GoPath, ".envrc"), []byte(buf.String()), 0664)
+	_ = os.Remove(filepath.Join(task.GoFmlPath, ".envrc"))
+	err = ioutil.WriteFile(filepath.Join(task.GoFmlPath, ".envrc"), []byte(buf.String()), 0664)
 
-	fmt.Printf("gofml: wrote activation script at %s\n", filepath.Join(task.GoPath, ".envrc"))
+	fmt.Printf("gofml: wrote activation script at %s\n", filepath.Join(task.GoFmlPath, ".envrc"))
 
 	return err
 }
